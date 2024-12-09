@@ -29,8 +29,9 @@ app.get('/shop/:id/:owner', controllers.ViewShop);
 app.get('/getshopproducts', controllers.getShopProducts);
 app.put('/addtgch', controllers.addTelegramChannel);
 app.post('/addproduct', upload.single('product_picture'), controllers.addProduct);
-app.post('/forgot-password',)
-
+app.post('/forgot-password', controllers.ForgotPassword);
+app.post('/check-code', controllers.checkCode);
+app.put('/update-password', controllers.updatePassword);
 // Serverni ishga tushirish
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);

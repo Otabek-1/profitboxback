@@ -3,103 +3,88 @@ const queries = require('./queries');
 const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
+const nodemailer = require("nodemailer");
+const { log } = require('console');
 
-
-// Faylni yuklash konfiguratsiyasi
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/'); // Fayllar saqlanadigan papka
+// Email Transporter Configuration
+const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+        user: "burhonovotabek5@gmail.com", // Replace with your email
+        pass: "bstc rlmw hfor xbla", // Replace with your email password or app password
     },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname)); // Unikal fayl nomi
-    }
 });
 
-const upload = multer({ storage });
+// Centralized File Upload Configuration
+const upload = multer({
+    storage: multer.diskStorage({
+        destination: 'uploads/',
+        filename: (req, file, cb) => {
+            cb(null, Date.now() + path.extname(file.originalname));
+        }
+    }),
+});
 
-
+// Get All Users
 function getUsers(req, res) {
     pool.query(queries.getUsers)
-        .then(result => {
-            res.json(result.rows);
-        })
+        .then(result => res.json(result.rows))
         .catch(error => {
-            console.error('Xatolik:', error.stack);
-            res.status(500).send('Xatolik yuz berdi');
+            console.error('Error:', error.stack);
+            res.status(500).send('Internal server error');
         });
 }
 
-let globaccess = "";
-
+// Add New User
 function addUser(req, res) {
     const { firstname, lastname, uname, phoneNumber, email, password, address } = req.body;
 
+    // Generate unique access ID and hashed password
+    const accessid = crypto.createHash('sha256').update(firstname).digest('hex') + Math.random() * 100;
+    const psw = crypto.createHash('sha256').update(password).digest('hex');
 
-
-    // Tekshiruv uchun alohida so'rovlar
-    const checkPhoneQuery = "SELECT * FROM profitboxusers WHERE phone = $1";
-    const checkEmailQuery = "SELECT * FROM profitboxusers WHERE email = $1";
-    const checkUnameQuery = "SELECT * FROM profitboxusers WHERE username = $1";
-
-    // 1. Telefon raqamni tekshirish
-    pool.query(checkPhoneQuery, [phoneNumber])
-        .then(phoneResult => {
-            if (phoneResult?.rows?.length > 0) {
+    // Check for existing phone, email, and username
+    Promise.all([
+        pool.query("SELECT * FROM profitboxusers WHERE phone = $1", [phoneNumber]),
+        pool.query("SELECT * FROM profitboxusers WHERE email = $1", [email]),
+        pool.query("SELECT * FROM profitboxusers WHERE username = $1", [uname])
+    ])
+        .then(([phoneResult, emailResult, unameResult]) => {
+            if (phoneResult.rows.length > 0) {
                 return res.status(400).json({ message: "User with this phone number is already registered." });
             }
-
-            // 2. Emailni tekshirish
-            return pool.query(checkEmailQuery, [email]);
-        })
-        .then(emailResult => {
-            if (emailResult?.rows?.length > 0) {
+            if (emailResult.rows.length > 0) {
                 return res.status(400).json({ message: "User with this email is already registered." });
             }
-
-            // 3. Username'ni tekshirish
-            return pool.query(checkUnameQuery, [uname]);
-        })
-        .then(unameResult => {
-            if (unameResult?.rows?.length > 0) {
+            if (unameResult.rows.length > 0) {
                 return res.status(400).json({ message: "This username is already taken." });
             }
-            const accessid = crypto.createHash('sha256').update(firstname).digest('hex') + Math.random() * 100;
-            globaccess = accessid;
-            const psw = crypto.createHash('sha256').update(password).digest('hex');
-            return pool.query(
-                queries.addUser,
-                [firstname, lastname, uname, phoneNumber, accessid, address, email, psw]
-            );
+
+            // Insert new user
+            return pool.query(queries.addUser, [firstname, lastname, uname, phoneNumber, accessid, address, email, psw]);
         })
-        .then(() => {
-            if (!res.headersSent) {
-                res.json({ message: "User successfully added!", accessid: globaccess });
-            }
-        })
-        .catch(err => {
-            if (!res.headersSent) {
-                console.error("Error:", err);
-                res.status(500).json({ message: "An error occurred on the server." });
-            }
+        .then(() => res.json({ message: "User successfully added!", accessid }))
+        .catch(error => {
+            console.error('Error:', error.stack);
+            res.status(500).json({ message: "Internal server error" });
         });
 }
 
+// Get Single User
 function getUser(req, res) {
     const { acc } = req.query;
     pool.query(queries.getUser, [acc])
-        .then(response => {
-            res.send(response.rows)
-        })
-        .catch(err => {
-            res.send(err);
-        })
+        .then(response => res.json(response.rows))
+        .catch(err => res.status(500).json({ message: "Internal server error", error: err.message }));
 }
 
+// User Login
 async function Login(req, res) {
     try {
         const { email, psw } = req.body;
         const hashedPassword = crypto.createHash('sha256').update(psw).digest('hex');
         const result = await pool.query(queries.login, [email, hashedPassword]);
+
         if (result.rows.length > 0) {
             res.json(result.rows[0]);
         } else {
@@ -107,20 +92,19 @@ async function Login(req, res) {
         }
     } catch (error) {
         console.error('Error during login:', error);
-        res.status(500).json({ message: "An error occurred during login." });
+        res.status(500).json({ message: "Internal server error" });
     }
 }
 
-
-// Add shop clusters to the database
-
+// Add Shop Cluster
 async function addShopCluster(req, res) {
     const { shopname, shopowner, shop_desc, categories } = req.body;
     const categories_ = categories.split(' ');
-    const shop_picture = req.file ? req.file.path : null; // Rasm fayli yo'q bo'lsa, `null` saqlanadi
+    const shop_picture = req.file ? req.file.path : null;
 
     try {
         const result = await pool.query(queries.addShopCluster, [shopname, shopowner, shop_picture, shop_desc, categories_]);
+
         if (result.rowCount > 0) {
             res.json({ message: "Shop cluster added successfully", shop_picture });
         } else {
@@ -128,19 +112,69 @@ async function addShopCluster(req, res) {
         }
     } catch (error) {
         console.error('Error:', error);
-        res.status(500).json({ message: `Error: ${error.message}` });
+        res.status(500).json({ message: "Internal server error" });
     }
 }
 
+// Get Shops for a User
 async function getShopsOf(req, res) {
     const access = req.headers.authorization?.split(" ")[1];
     try {
         const result = await pool.query(queries.getshopsOf, [access]);
-        res.status(200).json(result.rows);
+        res.json(result.rows);
     } catch (error) {
-        res.status(400).json({ message: "error getting hops of", error });
-        console.log(error);
+        console.error('Error:', error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+}
 
+async function checkCode(req, res) {
+    const { id, code } = req.body;
+    try {
+        const result = await pool.query(queries.getPassCode, [code, id]);
+        if (result.rows.length > 0) {
+            res.json({ message: "Code is correct", change: true });
+            pool.query(queries.removeCode, [id, code]);
+        } else {
+            res.status(400).json({ message: "Code is incorrect" });
+        }
+    } catch (error) {
+        res.status(500).json({ message: error })
+    }
+}
+
+// Forgot Password
+async function ForgotPassword(req, res) {
+    const { email } = req.body;
+    const code = Math.floor(10000 + Math.random() * 9000); // Generate a random 4-digit code
+
+    try {
+        const user = await pool.query(queries.getUserByEmail, [email]);
+
+        if (user.rows.length > 0) {
+            const mailOptions = {
+                from: "burhonovotabek5@gmail.com",
+                to: email,
+                subject: "Password reset code",
+                text: `Your password reset code is: ${code}`
+            };
+
+            transporter.sendMail(mailOptions, (error, info) => {
+                if (error) {
+                    console.error('Error sending email:', error);
+                    return res.status(500).json({ message: "Error sending email", error });
+                }
+                res.json({ message: "Password reset code sent to your email.", data: user.rows[0] });
+                pool.query(queries.addPassCode, [user.rows[0].id, code])
+                console.log(info);
+
+            });
+        } else {
+            res.status(404).json({ message: "User not found with this email!" });
+        }
+    } catch (error) {
+        console.error('Error during password reset:', error);
+        res.status(500).json({ message: "Internal server error" });
     }
 }
 
@@ -188,9 +222,9 @@ async function ViewShop(req, res) {
     const { id, owner } = req.params;
     try {
         const result = await pool.query(queries.viewshop, [id, owner]);
-        if(result.rowCount >0){
+        if (result.rowCount > 0) {
             res.status(200).json(result.rows[0]);
-        }else{
+        } else {
             res.status(404).json({ message: "Shop not found!" });
         }
     } catch (error) {
@@ -209,11 +243,11 @@ async function getShopProducts(req, res) {
     }
 }
 
-async function addTelegramChannel(req,res){
-    const { id, channel} = req.body;
+async function addTelegramChannel(req, res) {
+    const { id, channel } = req.body;
     try {
         const result = await pool.query(queries.addTelegramChannel, [channel, id])
-        res.status(200).json({message:"Channel added successfully."});
+        res.status(200).json({ message: "Channel added successfully." });
     } catch (error) {
         res.status(400).json({ message: error });
     }
@@ -236,7 +270,7 @@ async function addProduct(req, res) {
             product_desc,
             sizesArray
         ]);
-        
+
         if (result.rowCount > 0) {
             res.json({ message: "Product added successfully!", product_picture });
         } else {
@@ -248,27 +282,25 @@ async function addProduct(req, res) {
     }
 }
 
-
-async function ForgotPassword(req,res){
-    const { email } = req.body;
+async function updatePassword(req,res) {
+    const { id, newPassword } = req.body;
+    const psw = crypto.createHash('sha256').update(newPassword).digest('hex');
     try {
-        const user = await pool.query(queries.getUserByEmail, [email]);
-        if(user.rows.length > 0){
-            res.status(200).json({ message: "Password reset link sent to your email.", token });
-        }else{
-            res.status(404).json({ message: "User not found!" });
-        }
+        const result = await pool.query(queries.updatePassword, [psw, id]);
+        res.status(200).json({ message: "Password updated successfully"})
     } catch (error) {
-        res.status(400).json({ message: error });
+        res.status(400).json({ message: "Error updating password" });
     }
+    
 }
 
 
+// Exports
 module.exports = {
     getUsers,
     addUser,
-    getUser,
     Login,
+    getUser,
     addShopCluster,
     getShopsOf,
     addEdu,
@@ -277,4 +309,7 @@ module.exports = {
     getShopProducts,
     addTelegramChannel,
     addProduct,
+    ForgotPassword,
+    checkCode,
+    updatePassword,
 };

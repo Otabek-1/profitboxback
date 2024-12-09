@@ -15,12 +15,18 @@ const addEduCenter = `INSERT INTO edu_centers (center_name, center_owner, edu_pi
 const getEduCenters = `SELECT * FROM edu_centers where center_owner = $1`;
 const addTelegramChannel = `UPDATE shops SET telegram_channel = $1 WHERE id = $2;`;
 // backend/queries.js
-const getUserByEmail = `SELECT * FROM users WHERE email=$1`;
+const getUserByEmail = `SELECT * FROM profitboxusers WHERE email = $1`;
 // Add product query
 const addProduct = `
     INSERT INTO shop_products (product_name, shop_id, product_image, product_desc, sizes) 
     VALUES ($1, $2, $3, $4, $5) RETURNING *;
 `;
+
+
+const addPassCode = `INSERT INTO "passwordTokens" (user_id, code) VALUES ($1, $2)`;
+const getPassCode = `SELECT * FROM "passwordTokens" WHERE code = $1 AND user_id = $2`;
+const removeCode = `DELETE FROM "passwordTokens" WHERE user_id = $1 AND code = $2`;
+const updatePassword = `UPDATE profitboxusers SET password = $1 WHERE id = $2`;
 
 module.exports = {
   getUsers,
@@ -35,5 +41,9 @@ module.exports = {
   getShopProducts,
   addTelegramChannel,
   addProduct,
-  getUserByEmail
+  getUserByEmail,
+  addPassCode,
+  getPassCode,
+  removeCode,
+  updatePassword,
 }
